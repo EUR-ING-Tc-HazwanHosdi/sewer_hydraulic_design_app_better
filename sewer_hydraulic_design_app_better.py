@@ -16,7 +16,7 @@ def velocity_color(v: float) -> str:
     return "green" if MIN_V <= v <= MAX_V else "red"
 
 
-def calculate_velocity(diameter: float, gradient: float, n: float, equation: str) -> float:
+def calculate_velocity(diameter: float, gradient: float, n: float, equation: str, c_hw: float = 130.0) -> float:
     if equation == "Manning":
         return (1 / n) * ((diameter / 4) ** (2 / 3)) * (gradient ** 0.5)
 
@@ -24,17 +24,17 @@ def calculate_velocity(diameter: float, gradient: float, n: float, equation: str
         return 5.74 * np.sqrt(diameter * gradient)
 
     elif equation == "Hazen-Williams":
-        c = 130
-        return 0.849 * c * ((diameter / 4) ** 0.63) * (gradient ** 0.54)
+        return 0.849 * c_hw * ((diameter / 4) ** 0.63) * (gradient ** 0.54)
 
     return (1 / n) * ((diameter / 4) ** (2 / 3)) * (gradient ** 0.5)
 
 
-def recalculate(df: pd.DataFrame, diameter: float, gradient: float, flow_per_pe: float, n: float = DEFAULT_N, equation: str = "Manning") -> pd.DataFrame:
+def recalculate(df: pd.DataFrame, diameter: float, gradient: float, flow_per_pe: float,
+                n: float = DEFAULT_N, equation: str = "Manning", c_hw: float = 130.0) -> pd.DataFrame:
     new_df = df.copy()
     new_df["Index"] = range(1, len(new_df) + 1)
     new_df["Design_Flow_m3s"] = new_df["PE_on_Line"] * flow_per_pe * new_df["Peak_Factor"]
-    velocity = calculate_velocity(diameter, gradient, n, equation)
+    velocity = calculate_velocity(diameter, gradient, n, equation, c_hw)
     new_df["Velocity_ms"] = velocity
     new_df["Velocity_Color"] = new_df["Velocity_ms"].apply(velocity_color)
     return new_df
@@ -167,11 +167,22 @@ with st.sidebar:
     gradient = st.slider("Gradient", min_value=0.001, max_value=0.01, value=0.005, step=0.0005, format="%.4f")
     flow_per_pe = st.slider("Flow per PE (m³/s)", min_value=0.0000010, max_value=0.0000100, value=0.0000027, step=0.0000001, format="%.7f")
     equation = st.selectbox("Hydraulic Equation", ["Manning", "Colebrook-White", "Hazen-Williams"])
+
+    if equation == "Manning":
+        roughness_n = st.number_input("Manning roughness n", min_value=0.010, max_value=0.020, value=0.013, step=0.001, format="%.3f")
+        c_hw = 130.0
+    elif equation == "Hazen-Williams":
+        c_hw = st.number_input("Hazen-Williams coefficient C", min_value=80.0, max_value=160.0, value=130.0, step=1.0)
+        roughness_n = DEFAULT_N
+    else:
+        roughness_n = DEFAULT_N
+        c_hw = 130.0
+        st.caption("Colebrook-White currently uses simplified placeholder formula.")
+
     view_name = st.radio("3D View", ["Reset", "Top", "Side"], horizontal=True)
     st.markdown("---")
-    st.write(f"Manning roughness n = **{DEFAULT_N}**")
     st.write(f"Selected equation = **{equation}**")
-
+    
 if uploaded_file is None:
     st.info("Upload your Excel file to start using the software.")
     st.markdown(
@@ -189,7 +200,15 @@ else:
         st.error(f"Missing required columns: {', '.join(missing_cols)}")
         st.stop()
 
-    result_df = recalculate(raw_df, diameter, gradient, flow_per_pe, equation=equation)
+    result_df = recalculate(
+    raw_df,
+    diameter,
+    gradient,
+    flow_per_pe,
+    n=roughness_n,
+    equation=equation,
+    c_hw=c_hw
+)
     status, min_v, max_v = get_status_text(result_df)
 
     c1, c2, c3 = st.columns(3)
